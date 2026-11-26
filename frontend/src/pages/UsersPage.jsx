@@ -7,6 +7,7 @@
 import { useEffect, useState } from "react";
 import * as usersApi from "../api/users.js";
 import UserCard from "../components/users/UserCard.jsx";
+import { displayName } from "../components/common/Avatar.jsx";
 import FollowButton from "../components/users/FollowButton.jsx";
 
 export default function UsersPage() {
@@ -67,7 +68,13 @@ export default function UsersPage() {
                 🔒
               </span>
             )}
-            <FollowButton userId={u.id} status={u.follow_status} onChange={(s) => setStatus(u.id, s)} />
+            <FollowButton
+              userId={u.id}
+              status={u.follow_status}
+              onChange={(s) => setStatus(u.id, s)}
+              name={displayName(u)}
+              isPrivate={u.is_private}
+            />
           </UserCard>
         ))}
       </div>

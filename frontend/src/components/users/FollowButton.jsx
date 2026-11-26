@@ -16,8 +16,18 @@
 //   "pending"   Requested    DELETE /api/users/{id}/follow  (cancel request)
 //   "following" Unfollow     DELETE /api/users/{id}/follow
 //   "self"      (nothing: you can't follow yourself)
+//
+// Bonus (audit: "confirmation pop-up when unfollowing"): "Unfollow" first
+// opens a <ConfirmDialog>, and only "Yes" sends the DELETE. Cancelling a
+// pending request does NOT ask: it's harmless and you can just click Follow
+// again. Unfollowing a PRIVATE profile is not harmless: you lose access to
+// their posts and must send a new request, so the message says so.
+//
+// The pop-up is only a UI nicety. It is not a security check: the server
+// still decides everything from the session cookie.
 import { useState } from "react";
 import * as usersApi from "../../api/users.js";
+import ConfirmDialog from "../common/ConfirmDialog.jsx";
 
 const LABELS = {
   none: "Follow",
@@ -33,24 +43,21 @@ const HINTS = {
   following: "Unfollow",
 };
 
-export default function FollowButton({ userId, status, onChange }) {
+// `name` and `isPrivate` are optional and only used for the pop-up's text.
+// Both parents (ProfilePage, UsersPage) already have them from the server.
+export default function FollowButton({ userId, status, onChange, name, isPrivate }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [confirming, setConfirming] = useState(false);
 
   if (status === "self" || !LABELS[status]) return null;
 
-  async function handleClick() {
+  // Runs one API call with the busy flag and error handling around it.
+  async function run(call) {
     setBusy(true);
     setError("");
     try {
-      if (status === "none") {
-        const res = await usersApi.follow(userId);
-        onChange?.(res.follow_status); // "following" or "pending"
-      } else {
-        // Bonus (Fri 4): ask with <ConfirmDialog> before unfollowing.
-        await usersApi.unfollow(userId);
-        onChange?.("none");
-      }
+      await call();
     } catch (err) {
       // Usually a stale button: e.g. in another browser tab you already
       // followed them (409) or they declined your request (404). Show the
@@ -60,6 +67,36 @@ export default function FollowButton({ userId, status, onChange }) {
       setBusy(false);
     }
   }
+
+  function handleClick() {
+    if (status === "none") {
+      run(async () => {
+        const res = await usersApi.follow(userId);
+        onChange?.(res.follow_status); // "following" or "pending"
+      });
+    } else if (status === "pending") {
+      run(async () => {
+        await usersApi.unfollow(userId); // cancel the request, no pop-up
+        onChange?.("none");
+      });
+    } else {
+      setConfirming(true); // "following": ask first, see handleConfirmUnfollow
+    }
+  }
+
+  async function handleConfirmUnfollow() {
+    await run(async () => {
+      await usersApi.unfollow(userId);
+      onChange?.("none");
+    });
+    // Close even on an error: the message shows next to the button.
+    setConfirming(false);
+  }
+
+  const who = name || "this user";
+  const unfollowMessage = isPrivate
+    ? `${who}'s profile is private. You will no longer see their posts or info, and you'll have to send a new follow request to see them again.`
+    : `You will stop seeing ${who}'s followers-only posts. You can follow them again at any time.`;
 
   return (
     <span className="follow-button-wrap">
@@ -74,6 +111,16 @@ export default function FollowButton({ userId, status, onChange }) {
         {busy ? "…" : LABELS[status]}
       </button>
       {error && <span className="form-error follow-button-error">{error}</span>}
+      <ConfirmDialog
+        open={confirming}
+        title={`Unfollow ${who}?`}
+        message={unfollowMessage}
+        confirmLabel="Unfollow"
+        danger
+        busy={busy}
+        onConfirm={handleConfirmUnfollow}
+        onCancel={() => setConfirming(false)}
+      />
     </span>
   );
 }

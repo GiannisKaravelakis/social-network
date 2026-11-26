@@ -2,13 +2,26 @@
 //
 // One row in the bell's dropdown. What it shows and which buttons it has
 // depend only on `type` (API.md 1.4). There is no "accept notification"
-// endpoint: the buttons call the real domain endpoint (here
-// POST /api/follow-requests/{actor.id}/accept), and THAT endpoint deletes the
-// notification on the server. We then remove it from the list with onResolved.
+// endpoint: the buttons call the real domain endpoint, and THAT endpoint
+// deletes the notification on the server. We then remove it from the list
+// with onResolved.
 //
-// Why actor.id is safe to send: the server's query is
-//   ... WHERE follower_id = <actor.id> AND following_id = <logged-in user>
-// so even a hand-edited request can only answer requests addressed to YOU.
+//   type                 who sees it     Accept / Decline calls
+//   follow_request       private user    POST /api/follow-requests/{actor.id}/accept|decline
+//   group_invite         invitee (me)    POST /api/groups/{group.id}/members/{MY id}/accept|decline
+//   group_join_request   group creator   POST /api/groups/{group.id}/members/{actor.id}/accept|decline
+//
+// Note the two group rows use the SAME endpoint with a different user ID:
+// the URL always names the person who becomes (or doesn't become) a member.
+// For an invite that's me; for a join request it's the requester (actor).
+//
+// Why sending these IDs is safe: the server re-checks everything from the
+// session cookie, never from the notification:
+//   - follow request: ... WHERE follower_id = <actor.id> AND following_id = <me>
+//   - group invite: C's AcceptMember answers 403 unless <me> IS the invited user
+//   - join request: C's AcceptMember answers 403 unless <me> is the group's creator
+// So a hand-edited request can only answer requests addressed to YOU
+// (audit: only the creator accepts join requests).
 //
 // XSS: names and titles are rendered as text children, so React escapes
 // them. A group called "<img onerror=...>" shows up literally, never runs.
@@ -16,6 +29,9 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import Avatar, { displayName } from "../common/Avatar.jsx";
 import * as notificationsApi from "../../api/notifications.js";
+import * as groupsApi from "../../api/groups.js";
+import useAuth from "../../hooks/useAuth.js";
+import { announceGroupMembershipChanged } from "../../hooks/useGroupMembershipChanged.js";
 
 // "5m ago" style. Plain JS, no date library needed.
 function timeAgo(iso) {
@@ -32,6 +48,7 @@ function timeAgo(iso) {
 
 export default function NotificationItem({ notification, onResolved, onNavigate }) {
   const { id, type, is_read: isRead, created_at: createdAt, actor, group, event } = notification;
+  const { user } = useAuth(); // me: the invitee, for group_invite
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -50,19 +67,41 @@ export default function NotificationItem({ notification, onResolved, onNavigate 
   ) : null;
 
   let text;
+  // `actions` holds two functions that take no arguments, so answer() below
+  // doesn't need to know which endpoint or which IDs each type uses.
   let actions = null;
 
   switch (type) {
     case "follow_request":
       text = <>{actorLink} wants to follow you</>;
-      actions = { accept: notificationsApi.acceptFollowRequest, decline: notificationsApi.declineFollowRequest };
+      if (actor) {
+        actions = {
+          accept: () => notificationsApi.acceptFollowRequest(actor.id),
+          decline: () => notificationsApi.declineFollowRequest(actor.id),
+        };
+      }
       break;
     case "group_invite":
-      // Accept / Decline buttons for groups come on Fri 4 (paired with C).
       text = <>{actorLink} invited you to join {groupLink}</>;
+      // The member being accepted is ME, not the inviter.
+      if (group && user) {
+        actions = {
+          accept: () => groupsApi.acceptGroupMember(group.id, user.id),
+          decline: () => groupsApi.declineGroupMember(group.id, user.id),
+          groupId: group.id,
+        };
+      }
       break;
     case "group_join_request":
       text = <>{actorLink} wants to join {groupLink}</>;
+      // The member being accepted is the requester (actor).
+      if (group && actor) {
+        actions = {
+          accept: () => groupsApi.acceptGroupMember(group.id, actor.id),
+          decline: () => groupsApi.declineGroupMember(group.id, actor.id),
+          groupId: group.id,
+        };
+      }
       break;
     case "group_event":
       text = (
@@ -83,15 +122,18 @@ export default function NotificationItem({ notification, onResolved, onNavigate 
   }
 
   async function answer(call) {
-    if (!actor) return;
     setBusy(true);
     setError("");
     try {
-      await call(actor.id);
+      await call();
+      // A group page that is open right now (e.g. /groups/2 showing its own
+      // Accept / Decline) reloads, so it doesn't show a stale invite.
+      if (actions.groupId) announceGroupMembershipChanged(actions.groupId);
       onResolved(id); // server already deleted it; drop it locally
     } catch (err) {
-      // Usually 404: the requester cancelled in the meantime. Show why;
-      // the list is refetched the next time the bell opens.
+      // Usually 404 / 409: the request was already answered or cancelled
+      // somewhere else (another tab, the group page). Show why; the list is
+      // refetched the next time the bell opens.
       setError(err.message);
       setBusy(false);
     }

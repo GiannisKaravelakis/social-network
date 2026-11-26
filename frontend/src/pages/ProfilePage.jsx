@@ -13,6 +13,7 @@ import Avatar, { displayName } from "../components/common/Avatar.jsx";
 import UserCard from "../components/users/UserCard.jsx";
 import PostCard from "../components/posts/PostCard.jsx";
 import FollowButton from "../components/users/FollowButton.jsx";
+import ConfirmDialog from "../components/common/ConfirmDialog.jsx";
 
 export default function ProfilePage() {
   const { id } = useParams();
@@ -80,7 +81,13 @@ export default function ProfilePage() {
         {isMe ? (
           <PrivacyToggle isPrivate={profile.is_private} onChanged={reload} />
         ) : (
-          <FollowButton userId={profile.id} status={profile.follow_status} onChange={reload} />
+          <FollowButton
+            userId={profile.id}
+            status={profile.follow_status}
+            onChange={reload}
+            name={displayName(profile)}
+            isPrivate={profile.is_private}
+          />
         )}
       </header>
 
@@ -181,13 +188,22 @@ function TabButton({ name, tab, setTab, children }) {
 
 // Only shown on your own profile. PATCH /api/me/privacy has no user ID in
 // the URL, so even a hand-made request can only change YOUR privacy.
+//
+// Bonus (audit: "confirmation pop-up for the privacy toggle"): the button
+// only opens a <ConfirmDialog>; "Yes" sends the PATCH. The message explains
+// what actually happens on the server in each direction, because it isn't
+// obvious:
+//   - public -> private: current followers KEEP access; only new followers
+//     need your approval from now on.
+//   - private -> public: every pending follow request is accepted
+//     automatically (API.md 1.2), and anyone can see your posts and info.
 function PrivacyToggle({ isPrivate, onChanged }) {
   const { setUser } = useAuth();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [confirming, setConfirming] = useState(false);
 
   async function toggle() {
-    // Bonus (Fri 4): replace with <ConfirmDialog>.
     setSaving(true);
     setError("");
     try {
@@ -200,20 +216,43 @@ function PrivacyToggle({ isPrivate, onChanged }) {
       setError(err.message);
     } finally {
       setSaving(false);
+      setConfirming(false);
     }
   }
 
+  const dialog = isPrivate
+    ? {
+        title: "Make your profile public?",
+        message:
+          "Anyone will be able to see your info, your followers lists and your public posts. All pending follow requests will be accepted automatically.",
+        confirmLabel: "Make public",
+      }
+    : {
+        title: "Make your profile private?",
+        message:
+          "Only your followers will see your info and posts. People who already follow you keep access; new followers will need your approval.",
+        confirmLabel: "Make private",
+      };
+
   return (
     <div className="privacy-toggle">
-      <button type="button" onClick={toggle} disabled={saving}>
+      <button type="button" onClick={() => setConfirming(true)} disabled={saving}>
         {isPrivate ? "Make profile public" : "Make profile private"}
       </button>
       {error && <p className="form-error">{error}</p>}
+      <ConfirmDialog
+        open={confirming}
+        title={dialog.title}
+        message={dialog.message}
+        confirmLabel={dialog.confirmLabel}
+        busy={saving}
+        onConfirm={toggle}
+        onCancel={() => setConfirming(false)}
+      />
     </div>
   );
 }
 
-// The user's posts, newest first, with "Load more" (cursor pagination:
 // ?before=<id of the oldest post we have>). Each post's own privacy is
 // checked on the server by B's CanViewPost, so an "almost private" or
 // "private" post you may not see is simply not in the list.

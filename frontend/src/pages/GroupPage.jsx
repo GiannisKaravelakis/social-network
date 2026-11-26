@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import useAuth from "../hooks/useAuth.js";
+import useGroupMembershipChanged from "../hooks/useGroupMembershipChanged.js";
 import {
   acceptGroupMember,
   createEvent,
@@ -59,6 +60,22 @@ export default function GroupPage() {
     loadPage();
     return () => { ignore = true; };
   }, [id]);
+
+  // The bell (Navbar) answered an invite or join request for THIS group
+  // while the page is open: reload so the buttons and member list are fresh.
+  // `id` from the URL is a string, the bell sends a number.
+  useGroupMembershipChanged(async (groupId) => {
+    if (String(groupId) !== id) return;
+    try {
+      const currentGroup = await getGroup(id);
+      setGroup(currentGroup);
+      if (currentGroup.status === "member") {
+        await loadMemberData(id);
+      }
+    } catch (reloadError) {
+      setError(reloadError.message);
+    }
+  });
 
   async function refreshMembershipData() {
     const [currentGroup, memberList, eventList] = await Promise.all([

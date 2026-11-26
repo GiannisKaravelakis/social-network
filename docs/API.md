@@ -222,8 +222,8 @@ Pending requests **to you**, newest first.
 | `type` | Sent to | `actor` | `group` | `event` | Bell shows | Accept / Decline call |
 | --- | --- | --- | --- | --- | --- | --- |
 | `follow_request` | the private user | requester | `null` | `null` | Accept / Decline | `POST /api/follow-requests/{actor.id}/accept` or `/decline` |
-| `group_invite` | invitee | inviter | ✓ | `null` | Accept / Decline | C's invite endpoints (Part 3) |
-| `group_join_request` | group creator | requester | ✓ | `null` | Accept / Decline | C's join-request endpoints (Part 3) |
+| `group_invite` | invitee | inviter | ✓ | `null` | Accept / Decline | `POST /api/groups/{group.id}/members/{my id}/accept` or `/decline` |
+| `group_join_request` | group creator | requester | ✓ | `null` | Accept / Decline | `POST /api/groups/{group.id}/members/{actor.id}/accept` or `/decline` |
 | `group_event` | every member except the event's creator | event creator | ✓ | ✓ | link to the group | none |
 | `follow_accepted` (bonus) | the follower | the user who accepted | `null` | `null` | text | none |
 | `new_follower` (bonus) | the public user | the new follower | `null` | `null` | text | none |

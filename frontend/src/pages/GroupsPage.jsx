@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import GroupCard from "../components/groups/GroupCard.jsx";
 import { createGroup, joinGroup, listGroups } from "../api/groups.js";
+import useGroupMembershipChanged from "../hooks/useGroupMembershipChanged.js";
 
 export default function GroupsPage() {
   const [groups, setGroups] = useState([]);
@@ -10,6 +11,14 @@ export default function GroupsPage() {
   const [error, setError] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+
+  // An invite / join request was answered from the bell: the status shown
+  // on a card (Invited / Requested / Member) may be out of date, so reload.
+  useGroupMembershipChanged(() => {
+    listGroups()
+      .then(setGroups)
+      .catch((reloadError) => setError(reloadError.message));
+  });
 
   useEffect(() => {
     let ignore = false;
